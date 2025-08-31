@@ -1,4 +1,4 @@
-FROM bitnami/kafka:3.6
+FROM bitnamilegacy/kafka:3.6
 
 # Defaults; override via compose
 ENV TOPIC=capstone-logi \
