@@ -340,11 +340,15 @@ services:
 
 
   faiss-simsearch:
-    profiles: [un-implemented] # TODO: When implemented, delete this line
+    profiles: [prod, dev]
     build:
-      context: ./faiss-simsearch
+      context: ./faiss-simsearch/
       dockerfile: Dockerfile
     restart: unless-stopped
+    volumes:
+      - faiss_data:/app/saved_data
+    ports:
+      - "8000:8000"
 
   cassandra-logdb:
     profiles: [un-implemented] # TODO: When implemented, delete this line
@@ -380,6 +384,7 @@ volumes:
   kafka_data_1:
   kafka_data_2:
   kafka_data_3:
+  faiss_data:
   pyspark_checkpoints:
   pyspark_checkpoints_prod:
 
