@@ -2,6 +2,7 @@ package capstoneLogi
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -14,15 +15,16 @@ import (
 )
 
 type LogFormat struct {
-	UserID               string `json:"userID"`
-	CurrentQuestionIndex int    `json:"currentQuestionIndex"`
-	EditorContentBefore  string `json:"editorContentBefore"`
-	EditorContentAfter   string `json:"editorContentAfter"`
-	Timestamp            string `json:"timestamp"`
-	IsPaste              bool   `json:"isPaste"`
-	IsDeletion           bool   `json:"isDeletion"`
-	IsCompilation        bool   `json:"isCompilation"`
-	IsSubmission         bool   `json:"isSubmission"`
+	// New unified event format from frontend (see capstoneLogi.ts)
+	Type       string `json:"type"`       // checkpoint | insert | delete | run | submission
+	SRN        string `json:"srn"`        // globally unique student ID
+	QuestionID int    `json:"questionID"` // global question ID
+	Ts         int64  `json:"ts"`         // epoch ms
+	// Optional fields depending on type
+	Content       string `json:"content,omitempty"`
+	Offset        int    `json:"offset,omitempty"`
+	NumCharacters int    `json:"numCharacters,omitempty"`
+	IsPaste       bool   `json:"isPaste,omitempty"`
 }
 
 type LogiRequest struct {
@@ -73,7 +75,7 @@ func HandleLogi(c *gin.Context) {
 		return
 	}
 
-	filename := request.Logs[0].UserID // assuming this batch of logs comes from a single user
+	filename := request.Logs[0].SRN // assuming this batch of logs comes from a single user
 
 	f, err := os.OpenFile("./capstone-logi-logs/"+filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
@@ -85,33 +87,37 @@ func HandleLogi(c *gin.Context) {
 	}
 	defer f.Close()
 
-	for _, logLine := range request.Logs {
-		text :=
-			logLine.UserID +
-				"," +
-				fmt.Sprint(logLine.CurrentQuestionIndex) +
-				"," +
-				strconv.Quote(logLine.EditorContentBefore) +
-				"," +
-				strconv.Quote(logLine.EditorContentAfter) +
-				"," +
-				logLine.Timestamp +
-				"," +
-				fmt.Sprint(logLine.IsPaste) +
-				"," +
-				fmt.Sprint(logLine.IsDeletion) +
-				"," +
-				fmt.Sprint(logLine.IsCompilation) +
-				"," +
-				fmt.Sprint(logLine.IsSubmission) + "\n"
+	for _, ev := range request.Logs {
+		// CSV columns: srn,questionID,type,ts,offset,numCharacters,isPaste,content
+		tsStr := strconv.FormatInt(ev.Ts, 10)
+		offsetStr := fmt.Sprint(ev.Offset)
+		numCharsStr := fmt.Sprint(ev.NumCharacters)
+		isPasteStr := fmt.Sprint(ev.IsPaste)
+		contentQuoted := strconv.Quote(ev.Content)
 
-		_, err := f.WriteString(text)
+		line := fmt.Sprintf("%s,%d,%s,%s,%s,%s,%s,%s\n",
+			ev.SRN,
+			ev.QuestionID,
+			ev.Type,
+			tsStr,
+			offsetStr,
+			numCharsStr,
+			isPasteStr,
+			contentQuoted,
+		)
+
+		_, err := f.WriteString(line)
 		if err != nil {
 			log.Println(err)
 		}
 
 		// forward to kafka too, apart from just writing to file
-		record := &kgo.Record{Topic: "capstone-logi", Value: []byte(text)}
+		payload, jerr := json.Marshal(ev)
+		if jerr != nil {
+			log.Println("json marshal error:", jerr)
+			continue
+		}
+		record := &kgo.Record{Topic: "capstone-logi", Value: payload}
 		// kafkaClient.Produce(kafkaCtx, record, func(_ *kgo.Record, err error) {
 		// 	log.Println("Kafka publishing done")
 		// 	if err != nil {

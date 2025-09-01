@@ -3,6 +3,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import AlertDialogWrapper from "@/components/ui/alertDialogWrapper";
+import { addLog, flushLogs } from "../capstoneLogi";
 
 import { useRef, useState } from "react";
 import { useAuth } from "@/lib/authContext";
@@ -16,8 +17,6 @@ export default function AssignmentTestCasePanel({
   assignmentID,
   languages,
   AIVivaTriggerRef,
-  logi,
-  forceFlush,
   userID,
 }: {
   assignmentData: any;
@@ -27,17 +26,6 @@ export default function AssignmentTestCasePanel({
   assignmentID: number;
   languages: string[];
   AIVivaTriggerRef: RefObject<HTMLElement>;
-  logi: (
-    userID: string,
-    editorContentBefore: string | undefined,
-    editorContentAfter: string | undefined,
-    timestamp: number,
-    isPaste: boolean,
-    isDeletion: boolean,
-    isCompilation: boolean,
-    isSubmission: boolean,
-  ) => void;
-  forceFlush: () => void;
   userID: string;
 }) {
   const dialogRef = useRef(null);
@@ -45,17 +33,12 @@ export default function AssignmentTestCasePanel({
   const { token } = useAuth();
   const navigate = useNavigate();
   const handleRun = async () => {
-    logi(
-      userID,
-      currentQuestionIndex,
-      editorData[currentQuestionIndex],
-      editorData[currentQuestionIndex],
-      Date.now(),
-      false,
-      false,
-      true,
-      false,
-    );
+    addLog({
+      type: "run",
+      srn: userID,
+      questionID: assignmentData.questions[currentQuestionIndex].ID,
+      ts: Date.now(),
+    });
 
     const tempOutputs: string[] = [];
     await Promise.all(
@@ -146,7 +129,7 @@ export default function AssignmentTestCasePanel({
 
   const handleEndTest = () => {
     // add other logic in the future
-    forceFlush();
+    flushLogs();
     setDialog({
       title: "Are you sure?",
       description:
@@ -162,17 +145,12 @@ export default function AssignmentTestCasePanel({
   };
 
   const handleSubmit = async () => {
-    logi(
-      userID,
-      currentQuestionIndex,
-      editorData[currentQuestionIndex],
-      editorData[currentQuestionIndex],
-      Date.now(),
-      false,
-      false,
-      false,
-      true,
-    );
+    addLog({
+      type: "submission",
+      srn: userID,
+      questionID: assignmentData.questions[currentQuestionIndex].ID,
+      ts: Date.now(),
+    });
     const payload = {
       code: editorData[currentQuestionIndex],
       language: languages[currentQuestionIndex],

@@ -162,7 +162,7 @@ services:
 
 
   kafka-consumer-dummy-dev:
-    profiles: [dev]
+    profiles: [debug] # change to dev when needed
     build:
       context: ./kafka-consumer-dummy
     restart: unless-stopped
@@ -174,11 +174,170 @@ services:
       - kafka-1-dev
 
   pyspark-streamproc:
-    profiles: [un-implemented] # TODO: When implemented, delete this line
+    profiles: [dev]
     build:
       context: ./pyspark-streamproc
       dockerfile: Dockerfile
     restart: unless-stopped
+    depends_on:
+      - kafka-1-dev
+      - redis-dev
+    environment:
+      - KAFKA_BOOTSTRAP=kafka-1-dev:9092
+      - KAFKA_TOPIC=capstone-logi
+      - CHECKPOINT_DIR=/checkpoints/capstone-logi
+      - REDIS_HOST=redis-dev
+      - REDIS_PORT=6379
+      - PYSPARK_PYTHON=/opt/venv/bin/python
+      - PYSPARK_DRIVER_PYTHON=/opt/venv/bin/python
+    volumes:
+      - ./pyspark-streamproc/app:/app
+      - pyspark_checkpoints:/checkpoints
+    command: >
+      bash -lc "/opt/bitnami/spark/bin/spark-submit \
+      --master local[*] \
+      --conf spark.pyspark.python=/opt/venv/bin/python \
+      --conf spark.pyspark.driver.python=/opt/venv/bin/python \
+      --conf spark.ui.enabled=true \
+      --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1 \
+      /app/main.py"
+
+  redis-dev:
+    profiles: [dev]
+    image: bitnami/redis:7.2.5
+    restart: unless-stopped
+    environment:
+      - ALLOW_EMPTY_PASSWORD=yes
+    ports:
+      - "6379:6379"
+
+  redis-commander-dev:
+    profiles: [dev]
+    image: rediscommander/redis-commander:latest
+    restart: unless-stopped
+    environment:
+      - REDIS_HOSTS=local:redis-dev:6379
+    ports:
+      - "8081:8081"
+    depends_on:
+      - redis-dev
+
+  spark-master-prod:
+    profiles: [prod]
+    build:
+      context: ./pyspark-streamproc
+      dockerfile: Dockerfile
+    environment:
+      - SPARK_MODE=master
+      - PYSPARK_PYTHON=/opt/venv/bin/python
+      - PYSPARK_DRIVER_PYTHON=/opt/venv/bin/python
+    volumes:
+      - pyspark_checkpoints_prod:/checkpoints
+
+  spark-worker-1-prod:
+    profiles: [prod]
+    build:
+      context: ./pyspark-streamproc
+      dockerfile: Dockerfile
+    depends_on:
+      - spark-master-prod
+    environment:
+      - SPARK_MODE=worker
+      - SPARK_MASTER_URL=spark://spark-master-prod:7077
+      - PYSPARK_PYTHON=/opt/venv/bin/python
+      - PYSPARK_DRIVER_PYTHON=/opt/venv/bin/python
+    volumes:
+      - pyspark_checkpoints_prod:/checkpoints
+
+  spark-worker-2-prod:
+    profiles: [prod]
+    build:
+      context: ./pyspark-streamproc
+      dockerfile: Dockerfile
+    depends_on:
+      - spark-master-prod
+    environment:
+      - SPARK_MODE=worker
+      - SPARK_MASTER_URL=spark://spark-master-prod:7077
+      - PYSPARK_PYTHON=/opt/venv/bin/python
+      - PYSPARK_DRIVER_PYTHON=/opt/venv/bin/python
+    volumes:
+      - pyspark_checkpoints_prod:/checkpoints
+
+  pyspark-1-prod:
+    profiles: [prod]
+    build:
+      context: ./pyspark-streamproc
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - spark-master-prod
+      - spark-worker-1-prod
+      - spark-worker-2-prod
+      - kafka-1-prod
+      - kafka-2-prod
+      - kafka-3-prod
+      - redis-cluster-init
+    environment:
+      - KAFKA_BOOTSTRAP=kafka-1-prod:9092,kafka-2-prod:9092,kafka-3-prod:9092
+      - KAFKA_TOPIC=capstone-logi
+      - CHECKPOINT_DIR=/checkpoints/capstone-logi
+      - REDIS_CLUSTER_NODES=redis-0-prod:6379 redis-1-prod:6379 redis-2-prod:6379
+      - PYSPARK_PYTHON=/opt/venv/bin/python
+      - PYSPARK_DRIVER_PYTHON=/opt/venv/bin/python
+    volumes:
+      - ./pyspark-streamproc/app:/app
+      - pyspark_checkpoints_prod:/checkpoints
+    command: >
+      bash -lc "/opt/bitnami/spark/bin/spark-submit \
+      --master spark://spark-master-prod:7077 \
+      --deploy-mode cluster \
+      --supervise \
+      --conf spark.pyspark.python=/opt/venv/bin/python \
+      --conf spark.pyspark.driver.python=/opt/venv/bin/python \
+      --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1 \
+      /app/main.py"
+
+  # Redis Cluster (3 masters, no replicas) for prod demo
+  redis-0-prod:
+    profiles: [prod]
+    image: bitnami/redis-cluster:7.2.5
+    environment:
+      - ALLOW_EMPTY_PASSWORD=yes
+      - REDIS_NODES=redis-0-prod redis-1-prod redis-2-prod
+    restart: unless-stopped
+
+  redis-1-prod:
+    profiles: [prod]
+    image: bitnami/redis-cluster:7.2.5
+    environment:
+      - ALLOW_EMPTY_PASSWORD=yes
+      - REDIS_NODES=redis-0-prod redis-1-prod redis-2-prod
+    restart: unless-stopped
+
+  redis-2-prod:
+    profiles: [prod]
+    image: bitnami/redis-cluster:7.2.5
+    environment:
+      - ALLOW_EMPTY_PASSWORD=yes
+      - REDIS_NODES=redis-0-prod redis-1-prod redis-2-prod
+    restart: unless-stopped
+
+  redis-cluster-init:
+    profiles: [prod]
+    image: bitnami/redis-cluster:7.2.5
+    depends_on:
+      - redis-0-prod
+      - redis-1-prod
+      - redis-2-prod
+    environment:
+      - ALLOW_EMPTY_PASSWORD=yes
+      - REDIS_NODES=redis-0-prod redis-1-prod redis-2-prod
+      - REDIS_CLUSTER_REPLICAS=0
+      - REDIS_CLUSTER_CREATOR=yes
+    restart: "no"
+
+
 
   faiss-simsearch:
     profiles: [prod, dev]
@@ -226,6 +385,8 @@ volumes:
   kafka_data_2:
   kafka_data_3:
   faiss_data:
+  pyspark_checkpoints:
+  pyspark_checkpoints_prod:
 
 networks:
   default: {}
