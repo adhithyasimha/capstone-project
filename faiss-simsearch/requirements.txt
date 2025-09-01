@@ -12,7 +12,5 @@ transformers
 datasets
 fastapi
 uvicorn
-transformers
-torch
 faiss-cpu
 numpy

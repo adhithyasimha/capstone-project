@@ -1,11 +1,18 @@
 import ast
 import re
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 def extract_functions(code_string):
     functions = []
+    logger.info(f"Extracting functions from code string of length {len(code_string)}")
     
     try:
         # First try using AST for proper parsing
+        logger.info("Attempting AST-based function extraction")
         tree = ast.parse(code_string)
         
         for node in ast.walk(tree):
@@ -17,6 +24,9 @@ def extract_functions(code_string):
                 # Generate a simple AST representation as string
                 func_ast = ast.dump(node)
                 
+                logger.info(f"AST: Found function '{node.name}' at line {node.lineno}")
+                logger.info(f"AST: Function code: {func_code}")
+                
                 functions.append({
                     "name": node.name,
                     "code": func_code,
@@ -25,7 +35,7 @@ def extract_functions(code_string):
                 })
         
     except SyntaxError as e:
-        print(f"[WARNING] AST parsing failed: {e}. Trying regex fallback.")
+        logger.warning(f"AST parsing failed: {e}. Trying regex fallback.")
         
         # Fallback to regex-based function extraction
         function_pattern = r'def\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(([^)]*)\):'
@@ -55,6 +65,9 @@ def extract_functions(code_string):
             # Get line number (approximately)
             line_count = code_string[:func_start].count('\n') + 1
             
+            logger.info(f"Regex: Found function '{func_name}' at line {line_count}")
+            logger.info(f"Regex: Function code: {func_code}")
+            
             functions.append({
                 "name": func_name,
                 "code": func_code,
@@ -63,8 +76,8 @@ def extract_functions(code_string):
                 "lineno": line_count
             })
     
-    print(f"[DEBUG] Successfully extracted {len(functions)} functions")
+    logger.info(f"Successfully extracted {len(functions)} functions")
     for func in functions:
-        print(f"[DEBUG] Found function: {func['name']}")
+        logger.info(f"Found function: {func['name']} with {len(func['code'].splitlines())} lines")
     
     return functions
