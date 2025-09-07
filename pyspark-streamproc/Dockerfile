@@ -10,7 +10,9 @@ RUN install_packages python3-pip python3-venv \
   && /opt/venv/bin/pip install --no-cache-dir --upgrade pip \
   && /opt/venv/bin/pip install --no-cache-dir -r /tmp/requirements.txt \
   && mkdir -p /app \
-  && chown -R 1001:1001 /app
+  && chown -R 1001:1001 /app \
+  && mkdir -p /checkpoints \
+  && chown -R 1001:1001 /checkpoints
 
 # Ensure venv python is used for PySpark driver/executors by default
 ENV PATH="/opt/venv/bin:${PATH}"

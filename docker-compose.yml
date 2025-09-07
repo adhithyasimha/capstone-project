@@ -15,6 +15,7 @@ services:
       - kafka-1-prod
       - kafka-2-prod
       - kafka-3-prod
+      - kafka-init-prod
     environment:
       - KAFKA_BROKERS=kafka-1-prod:9092,kafka-2-prod:9092,kafka-3-prod:9092
 
@@ -46,6 +47,7 @@ services:
     depends_on:
       - postgres
       - kafka-1-dev
+      - kafka-init-dev
     environment:
       - KAFKA_BROKERS=kafka-1-dev:9092
     develop:
@@ -139,6 +141,17 @@ services:
     volumes:
       - kafka_data_3:/bitnami/kafka
 
+  kafka-init-prod:
+    profiles: [prod]
+    image: bitnamilegacy/kafka:3.7
+    restart: "no"
+    depends_on:
+      - kafka-1-prod
+      - kafka-2-prod
+      - kafka-3-prod
+    entrypoint: ["/bin/bash", "-lc"]
+    command: "/opt/bitnami/kafka/bin/kafka-topics.sh --bootstrap-server kafka-1-prod:9092 --create --topic capstone-logi --partitions 3 --replication-factor 3 || true && /opt/bitnami/kafka/bin/kafka-topics.sh --bootstrap-server kafka-1-prod:9092 --alter --topic capstone-logi --partitions 3 || true"
+
   kafka-1-dev:
     profiles: [dev]
     build:
@@ -172,6 +185,16 @@ services:
       - BOOTSTRAP=kafka-1-dev:9092
     depends_on:
       - kafka-1-dev
+      - kafka-init-dev
+
+  kafka-init-dev:
+    profiles: [dev]
+    image: bitnamilegacy/kafka:3.7
+    restart: "no"
+    depends_on:
+      - kafka-1-dev
+    entrypoint: ["/bin/bash", "-lc"]
+    command: "/opt/bitnami/kafka/bin/kafka-topics.sh --bootstrap-server kafka-1-dev:9092 --create --topic capstone-logi --partitions 3 --replication-factor 1 || true && /opt/bitnami/kafka/bin/kafka-topics.sh --bootstrap-server kafka-1-dev:9092 --alter --topic capstone-logi --partitions 3 || true"
 
   pyspark-streamproc:
     profiles: [dev]
@@ -182,10 +205,11 @@ services:
     depends_on:
       - kafka-1-dev
       - redis-dev
+      - kafka-init-dev
     environment:
       - KAFKA_BOOTSTRAP=kafka-1-dev:9092
       - KAFKA_TOPIC=capstone-logi
-      - CHECKPOINT_DIR=/checkpoints/capstone-logi
+      - CHECKPOINT_DIR=/checkpoints
       - REDIS_HOST=redis-dev
       - REDIS_PORT=6379
       - PYSPARK_PYTHON=/opt/venv/bin/python
@@ -194,7 +218,8 @@ services:
       - ./pyspark-streamproc/app:/app
       - pyspark_checkpoints:/checkpoints
     command: >
-      bash -lc "/opt/bitnami/spark/bin/spark-submit \
+      bash -lc "\
+      /opt/bitnami/spark/bin/spark-submit \
       --master local[*] \
       --conf spark.pyspark.python=/opt/venv/bin/python \
       --conf spark.pyspark.driver.python=/opt/venv/bin/python \
@@ -278,6 +303,7 @@ services:
       - kafka-2-prod
       - kafka-3-prod
       - redis-cluster-init
+      - kafka-init-prod
     environment:
       - KAFKA_BOOTSTRAP=kafka-1-prod:9092,kafka-2-prod:9092,kafka-3-prod:9092
       - KAFKA_TOPIC=capstone-logi
@@ -289,7 +315,8 @@ services:
       - ./pyspark-streamproc/app:/app
       - pyspark_checkpoints_prod:/checkpoints
     command: >
-      bash -lc "/opt/bitnami/spark/bin/spark-submit \
+      bash -lc "install -d -o 1001 -g 1001 /checkpoints/capstone-logi && \
+      /opt/bitnami/spark/bin/spark-submit \
       --master spark://spark-master-prod:7077 \
       --deploy-mode cluster \
       --supervise \
