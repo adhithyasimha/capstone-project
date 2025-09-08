@@ -41,7 +41,7 @@ def main() -> None:
         .load()
     )
 
-    # JSON schema matching handleLogi.go and capstoneLogi.ts
+    # JSON schema matching handleLogi.go and capstoneLogi.ts (eventID is optional)
     event_schema = StructType([
         StructField("type", StringType(), True),
         StructField("srn", StringType(), True),
@@ -51,6 +51,7 @@ def main() -> None:
         StructField("offset", IntegerType(), True),
         StructField("numCharacters", IntegerType(), True),
         StructField("isPaste", BooleanType(), True),
+        StructField("eventID", StringType(), True),
     ])
 
     # Parse JSON payload into typed columns and include basic metadata

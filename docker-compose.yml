@@ -15,7 +15,6 @@ services:
       - kafka-1-prod
       - kafka-2-prod
       - kafka-3-prod
-      - kafka-init-prod
     environment:
       - KAFKA_BROKERS=kafka-1-prod:9092,kafka-2-prod:9092,kafka-3-prod:9092
 
@@ -47,7 +46,6 @@ services:
     depends_on:
       - postgres
       - kafka-1-dev
-      - kafka-init-dev
     environment:
       - KAFKA_BROKERS=kafka-1-dev:9092
     develop:
@@ -115,6 +113,40 @@ services:
     volumes:
       - kafka_data_1:/bitnami/kafka
 
+  kafka-connect-prod:
+    profiles: [prod]
+    build:
+      context: ./datastax-kafka-connect
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      - CONNECT_BOOTSTRAP_SERVERS=kafka-1-prod:9092,kafka-2-prod:9092,kafka-3-prod:9092
+      - CONNECT_GROUP_ID=connect-cluster-prod
+      - CONNECT_CONFIG_STORAGE_TOPIC=connect-configs-prod
+      - CONNECT_OFFSET_STORAGE_TOPIC=connect-offsets-prod
+      - CONNECT_STATUS_STORAGE_TOPIC=connect-status-prod
+      - CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR=3
+      - CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR=3
+      - CONNECT_STATUS_STORAGE_REPLICATION_FACTOR=3
+      - CONNECT_REST_ADVERTISED_HOST_NAME=kafka-connect-prod
+      - CONNECT_KEY_CONVERTER=org.apache.kafka.connect.json.JsonConverter
+      - CONNECT_VALUE_CONVERTER=org.apache.kafka.connect.json.JsonConverter
+      - CONNECT_KEY_CONVERTER_SCHEMAS_ENABLE=false
+      - CONNECT_VALUE_CONVERTER_SCHEMAS_ENABLE=false
+      - CONNECT_PLUGIN_PATH=/usr/share/java,/usr/share/confluent-hub-components
+    depends_on:
+      - kafka-1-prod
+      - kafka-2-prod
+      - kafka-3-prod
+      - cassandra-1-prod
+      - cassandra-2-prod
+      - cassandra-3-prod
+      - cassandra-init-prod
+    ports:
+      - "8084:8083"
+    volumes:
+      - ./datastax-kafka-connect:/connectors:ro
+
   kafka-2-prod:
     profiles: [prod]
     build:
@@ -141,16 +173,6 @@ services:
     volumes:
       - kafka_data_3:/bitnami/kafka
 
-  kafka-init-prod:
-    profiles: [prod]
-    image: bitnamilegacy/kafka:3.7
-    restart: "no"
-    depends_on:
-      - kafka-1-prod
-      - kafka-2-prod
-      - kafka-3-prod
-    entrypoint: ["/bin/bash", "-lc"]
-    command: "/opt/bitnami/kafka/bin/kafka-topics.sh --bootstrap-server kafka-1-prod:9092 --create --topic capstone-logi --partitions 3 --replication-factor 3 || true && /opt/bitnami/kafka/bin/kafka-topics.sh --bootstrap-server kafka-1-prod:9092 --alter --topic capstone-logi --partitions 3 || true"
 
   kafka-1-dev:
     profiles: [dev]
@@ -161,17 +183,47 @@ services:
       - KAFKA_KRAFT_CLUSTER_ID=q1w2e3r4t5y6u7i8o9p0aa
       - KAFKA_CFG_NODE_ID=1
       - KAFKA_CFG_CONTROLLER_QUORUM_VOTERS=1@kafka-1-dev:9093
-      - KAFKA_CFG_LISTENERS=PLAINTEXT://:9092,EXTERNAL://:9094,CONTROLLER://:9093
-      - KAFKA_CFG_ADVERTISED_LISTENERS=PLAINTEXT://kafka-1-dev:9092,EXTERNAL://localhost:9094
-      - KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT
+      - KAFKA_CFG_LISTENERS=PLAINTEXT://:9092,CONTROLLER://:9093
+      - KAFKA_CFG_ADVERTISED_LISTENERS=PLAINTEXT://kafka-1-dev:9092
+      - KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
       - KAFKA_CFG_DEFAULT_REPLICATION_FACTOR=1
       - KAFKA_CFG_OFFSETS_TOPIC_REPLICATION_FACTOR=1
       - KAFKA_CFG_TRANSACTION_STATE_LOG_REPLICATION_FACTOR=1
       - KAFKA_CFG_TRANSACTION_STATE_LOG_MIN_ISR=1
-    ports:
-      - "9094:9094"
     volumes:
       - kafka_data_1:/bitnami/kafka
+
+  kafka-connect-dev:
+    profiles: [dev]
+    build:
+      context: ./datastax-kafka-connect
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      - CONNECT_BOOTSTRAP_SERVERS=kafka-1-dev:9092
+      - CONNECT_GROUP_ID=connect-cluster-dev
+      - CONNECT_CONFIG_STORAGE_TOPIC=connect-configs-dev
+      - CONNECT_OFFSET_STORAGE_TOPIC=connect-offsets-dev
+      - CONNECT_STATUS_STORAGE_TOPIC=connect-status-dev
+      - CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR=1
+      - CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR=1
+      - CONNECT_STATUS_STORAGE_REPLICATION_FACTOR=1
+      - CONNECT_REST_ADVERTISED_HOST_NAME=kafka-connect-dev
+      - CONNECT_KEY_CONVERTER=org.apache.kafka.connect.json.JsonConverter
+      - CONNECT_VALUE_CONVERTER=org.apache.kafka.connect.json.JsonConverter
+      - CONNECT_KEY_CONVERTER_SCHEMAS_ENABLE=false
+      - CONNECT_VALUE_CONVERTER_SCHEMAS_ENABLE=false
+      - CONNECT_PLUGIN_PATH=/usr/share/java,/usr/share/confluent-hub-components
+      - CONNECT_REST_PORT=8083
+      - CONNECT_REST_HOST_NAME=0.0.0.0
+    depends_on:
+      - kafka-1-dev
+      - cassandra-dev
+      - cassandra-init-dev
+    ports:
+      - "8083:8083"
+    volumes:
+      - ./datastax-kafka-connect:/connectors:ro
 
 
   kafka-consumer-dummy-dev:
@@ -185,16 +237,27 @@ services:
       - BOOTSTRAP=kafka-1-dev:9092
     depends_on:
       - kafka-1-dev
-      - kafka-init-dev
 
-  kafka-init-dev:
+
+  kafka-connect-init-dev:
     profiles: [dev]
-    image: bitnamilegacy/kafka:3.7
+    image: curlimages/curl:8.8.0
     restart: "no"
     depends_on:
-      - kafka-1-dev
-    entrypoint: ["/bin/bash", "-lc"]
-    command: "/opt/bitnami/kafka/bin/kafka-topics.sh --bootstrap-server kafka-1-dev:9092 --create --topic capstone-logi --partitions 3 --replication-factor 1 || true && /opt/bitnami/kafka/bin/kafka-topics.sh --bootstrap-server kafka-1-dev:9092 --alter --topic capstone-logi --partitions 3 || true"
+      - kafka-connect-dev
+    entrypoint: ["/bin/sh", "-c"]
+    command: |
+      i=0
+      while [ $$i -lt 60 ]; do
+        if curl -sf http://kafka-connect-dev:8083/connectors; then
+          break
+        fi
+        sleep 2
+        i=$$((i + 1))
+      done
+      curl -s -X POST -H 'Content-Type: application/json' --data @/connectors/sink-dev.json http://kafka-connect-dev:8083/connectors
+    volumes:
+      - ./datastax-kafka-connect:/connectors:ro
 
   pyspark-streamproc:
     profiles: [dev]
@@ -205,7 +268,6 @@ services:
     depends_on:
       - kafka-1-dev
       - redis-dev
-      - kafka-init-dev
     environment:
       - KAFKA_BOOTSTRAP=kafka-1-dev:9092
       - KAFKA_TOPIC=capstone-logi
@@ -303,7 +365,6 @@ services:
       - kafka-2-prod
       - kafka-3-prod
       - redis-cluster-init
-      - kafka-init-prod
     environment:
       - KAFKA_BOOTSTRAP=kafka-1-prod:9092,kafka-2-prod:9092,kafka-3-prod:9092
       - KAFKA_TOPIC=capstone-logi
@@ -377,12 +438,120 @@ services:
     ports:
       - "8000:8000"
 
-  cassandra-logdb:
-    profiles: [un-implemented] # TODO: When implemented, delete this line
+  cassandra-dev:
+    profiles: [dev]
     build:
       context: ./cassandra-logdb
       dockerfile: Dockerfile
     restart: unless-stopped
+    environment:
+      - CASSANDRA_CLUSTER_NAME=capstone_cluster
+      - CASSANDRA_NUM_TOKENS=16
+    ports:
+      - "9042:9042"
+    volumes:
+      - cassandra_data_dev:/var/lib/cassandra
+
+  cassandra-init-dev:
+    profiles: [dev]
+    image: cassandra:4.1
+    restart: "no"
+    depends_on:
+      - cassandra-dev
+    entrypoint: ["/bin/bash", "-c"]
+    command: |
+      i=0
+      while [ $$i -lt 30 ]; do
+        if cqlsh cassandra-dev 9042 -e 'DESCRIBE CLUSTER;'; then
+          break
+        fi
+        sleep 2
+        i=$$((i + 1))
+      done
+      cqlsh cassandra-dev 9042 -f /schema/schema-dev.cql
+    volumes:
+      - ./cassandra-logdb:/schema:ro
+
+  cassandra-1-prod:
+    profiles: [prod]
+    build:
+      context: ./cassandra-logdb
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      - CASSANDRA_CLUSTER_NAME=capstone_cluster
+      - CASSANDRA_NUM_TOKENS=16
+      - CASSANDRA_SEEDS=cassandra-1-prod,cassandra-2-prod
+    volumes:
+      - cassandra_data_1:/var/lib/cassandra
+
+  cassandra-2-prod:
+    profiles: [prod]
+    build:
+      context: ./cassandra-logdb
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      - CASSANDRA_CLUSTER_NAME=capstone_cluster
+      - CASSANDRA_NUM_TOKENS=16
+      - CASSANDRA_SEEDS=cassandra-1-prod,cassandra-2-prod
+    volumes:
+      - cassandra_data_2:/var/lib/cassandra
+
+  cassandra-3-prod:
+    profiles: [prod]
+    build:
+      context: ./cassandra-logdb
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      - CASSANDRA_CLUSTER_NAME=capstone_cluster
+      - CASSANDRA_NUM_TOKENS=16
+      - CASSANDRA_SEEDS=cassandra-1-prod,cassandra-2-prod
+    volumes:
+      - cassandra_data_3:/var/lib/cassandra
+
+  cassandra-init-prod:
+    profiles: [prod]
+    image: cassandra:4.1
+    restart: "no"
+    depends_on:
+      - cassandra-1-prod
+      - cassandra-2-prod
+      - cassandra-3-prod
+    entrypoint: ["/bin/bash", "-c"]
+    command: |
+      i=0
+      while [ $$i -lt 60 ]; do
+        if cqlsh cassandra-1-prod 9042 -e 'DESCRIBE CLUSTER;'; then
+          break
+        fi
+        sleep 2
+        i=$$((i + 1))
+      done
+      cqlsh cassandra-1-prod 9042 -f /schema/schema-prod.cql
+    volumes:
+      - ./cassandra-logdb:/schema:ro
+
+  kafka-connect-init-prod:
+    profiles: [prod]
+    image: curlimages/curl:8.8.0
+    restart: "no"
+    depends_on:
+      - kafka-connect-prod
+    entrypoint: ["/bin/sh", "-c"]
+    command: |
+      i=0
+      while [ $$i -lt 60 ]; do
+        if curl -sf http://kafka-connect-prod:8083/connectors; then
+          break
+        fi
+        sleep 2
+        i=$$((i + 1))
+      done
+      curl -s -X POST -H 'Content-Type: application/json' --data @/connectors/sink-prod.json http://kafka-connect-prod:8083/connectors
+    volumes:
+      - ./datastax-kafka-connect:/connectors:ro
 
   ml:
     profiles: [un-implemented] # TODO: When implemented, delete this line
@@ -414,6 +583,10 @@ volumes:
   faiss_data:
   pyspark_checkpoints:
   pyspark_checkpoints_prod:
+  cassandra_data_dev:
+  cassandra_data_1:
+  cassandra_data_2:
+  cassandra_data_3:
 
 networks:
   default: {}

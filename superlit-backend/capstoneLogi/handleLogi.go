@@ -2,6 +2,8 @@ package capstoneLogi
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -25,6 +27,8 @@ type LogFormat struct {
 	Offset        int    `json:"offset,omitempty"`
 	NumCharacters int    `json:"numCharacters,omitempty"`
 	IsPaste       bool   `json:"isPaste,omitempty"`
+	// Server-added deterministic identifier for idempotency in downstream sinks (e.g., Cassandra)
+	EventID string `json:"eventID,omitempty"`
 }
 
 type LogiRequest struct {
@@ -88,6 +92,30 @@ func HandleLogi(c *gin.Context) {
 	defer f.Close()
 
 	for _, ev := range request.Logs {
+		// compute deterministic eventID over stable fields
+		h := sha256.New()
+		// include all fields that define logical equality of an event
+		h.Write([]byte(ev.SRN))
+		h.Write([]byte{"|"[0]})
+		h.Write([]byte(strconv.Itoa(ev.QuestionID)))
+		h.Write([]byte{"|"[0]})
+		h.Write([]byte(strconv.FormatInt(ev.Ts, 10)))
+		h.Write([]byte{"|"[0]})
+		h.Write([]byte(ev.Type))
+		h.Write([]byte{"|"[0]})
+		h.Write([]byte(strconv.Itoa(ev.Offset)))
+		h.Write([]byte{"|"[0]})
+		h.Write([]byte(strconv.Itoa(ev.NumCharacters)))
+		h.Write([]byte{"|"[0]})
+		if ev.IsPaste {
+			h.Write([]byte("1"))
+		} else {
+			h.Write([]byte("0"))
+		}
+		h.Write([]byte{"|"[0]})
+		h.Write([]byte(ev.Content))
+		ev.EventID = hex.EncodeToString(h.Sum(nil))
+
 		// CSV columns: srn,questionID,type,ts,offset,numCharacters,isPaste,content
 		tsStr := strconv.FormatInt(ev.Ts, 10)
 		offsetStr := fmt.Sprint(ev.Offset)

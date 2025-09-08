@@ -1,0 +1,19 @@
+{
+  "name": "cassandra-logs-sink-dev",
+  "config": {
+    "connector.class": "io.confluent.connect.cassandra.CassandraSinkConnector",
+    "tasks.max": "2",
+    "topics": "capstone-logi",
+
+    "contactPoints": "cassandra-dev:9042",
+    "loadBalancing.localDc": "datacenter1",
+    "keyspace": "capstone",
+    "topic.capstone-logi.capstone.logs_by_student_question.mapping": "srn=value.srn, question_id=value.questionID, ts_ms=value.ts, event_id=value.eventID, type=value.type, content=value.content, offset=value.offset, num_characters=value.numCharacters, is_paste=value.isPaste",
+    "topic.capstone-logi.capstone.logs_by_student_question.consistencyLevel": "ONE",
+    "maxConcurrentRequests": "64",
+    "maxNumberOfRecordsInBatch": "64",
+    "queryExecutionTimeoutInSeconds": "30"
+  }
+}
+
+
