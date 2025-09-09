@@ -113,39 +113,6 @@ services:
     volumes:
       - kafka_data_1:/bitnami/kafka
 
-  kafka-connect-prod:
-    profiles: [prod]
-    build:
-      context: ./datastax-kafka-connect
-      dockerfile: Dockerfile
-    restart: unless-stopped
-    environment:
-      - CONNECT_BOOTSTRAP_SERVERS=kafka-1-prod:9092,kafka-2-prod:9092,kafka-3-prod:9092
-      - CONNECT_GROUP_ID=connect-cluster-prod
-      - CONNECT_CONFIG_STORAGE_TOPIC=connect-configs-prod
-      - CONNECT_OFFSET_STORAGE_TOPIC=connect-offsets-prod
-      - CONNECT_STATUS_STORAGE_TOPIC=connect-status-prod
-      - CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR=3
-      - CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR=3
-      - CONNECT_STATUS_STORAGE_REPLICATION_FACTOR=3
-      - CONNECT_REST_ADVERTISED_HOST_NAME=kafka-connect-prod
-      - CONNECT_KEY_CONVERTER=org.apache.kafka.connect.json.JsonConverter
-      - CONNECT_VALUE_CONVERTER=org.apache.kafka.connect.json.JsonConverter
-      - CONNECT_KEY_CONVERTER_SCHEMAS_ENABLE=false
-      - CONNECT_VALUE_CONVERTER_SCHEMAS_ENABLE=false
-      - CONNECT_PLUGIN_PATH=/usr/share/java,/usr/share/confluent-hub-components
-    depends_on:
-      - kafka-1-prod
-      - kafka-2-prod
-      - kafka-3-prod
-      - cassandra-1-prod
-      - cassandra-2-prod
-      - cassandra-3-prod
-      - cassandra-init-prod
-    ports:
-      - "8084:8083"
-    volumes:
-      - ./datastax-kafka-connect:/connectors:ro
 
   kafka-2-prod:
     profiles: [prod]
@@ -193,37 +160,6 @@ services:
     volumes:
       - kafka_data_1:/bitnami/kafka
 
-  kafka-connect-dev:
-    profiles: [dev]
-    build:
-      context: ./datastax-kafka-connect
-      dockerfile: Dockerfile
-    restart: unless-stopped
-    environment:
-      - CONNECT_BOOTSTRAP_SERVERS=kafka-1-dev:9092
-      - CONNECT_GROUP_ID=connect-cluster-dev
-      - CONNECT_CONFIG_STORAGE_TOPIC=connect-configs-dev
-      - CONNECT_OFFSET_STORAGE_TOPIC=connect-offsets-dev
-      - CONNECT_STATUS_STORAGE_TOPIC=connect-status-dev
-      - CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR=1
-      - CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR=1
-      - CONNECT_STATUS_STORAGE_REPLICATION_FACTOR=1
-      - CONNECT_REST_ADVERTISED_HOST_NAME=kafka-connect-dev
-      - CONNECT_KEY_CONVERTER=org.apache.kafka.connect.json.JsonConverter
-      - CONNECT_VALUE_CONVERTER=org.apache.kafka.connect.json.JsonConverter
-      - CONNECT_KEY_CONVERTER_SCHEMAS_ENABLE=false
-      - CONNECT_VALUE_CONVERTER_SCHEMAS_ENABLE=false
-      - CONNECT_PLUGIN_PATH=/usr/share/java,/usr/share/confluent-hub-components
-      - CONNECT_REST_PORT=8083
-      - CONNECT_REST_HOST_NAME=0.0.0.0
-    depends_on:
-      - kafka-1-dev
-      - cassandra-dev
-      - cassandra-init-dev
-    ports:
-      - "8083:8083"
-    volumes:
-      - ./datastax-kafka-connect:/connectors:ro
 
 
   kafka-consumer-dummy-dev:
@@ -232,32 +168,61 @@ services:
       context: ./kafka-consumer-dummy
     restart: unless-stopped
     environment:
-      - TOPIC=capstone-logi
+      - TOPIC=capstonelogi
       - GROUP_ID=dummy-consumer
       - BOOTSTRAP=kafka-1-dev:9092
     depends_on:
       - kafka-1-dev
 
-
-  kafka-connect-init-dev:
+  cassandra-connector-dev:
     profiles: [dev]
-    image: curlimages/curl:8.8.0
-    restart: "no"
+    build:
+      context: ./cassandra-connector
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      - KAFKA_BROKERS=kafka-1-dev:9092
+      - KAFKA_TOPIC=capstonelogi
+      - KAFKA_GROUP_ID=cassandra-logs-consumer
+      - CASSANDRA_HOSTS=cassandra-dev
+      - CASSANDRA_KEYSPACE=capstone
+      - CASSANDRA_PORT=9042
+      - BATCH_SIZE=100
+      - HEALTH_PORT=8080
     depends_on:
-      - kafka-connect-dev
-    entrypoint: ["/bin/sh", "-c"]
-    command: |
-      i=0
-      while [ $$i -lt 60 ]; do
-        if curl -sf http://kafka-connect-dev:8083/connectors; then
-          break
-        fi
-        sleep 2
-        i=$$((i + 1))
-      done
-      curl -s -X POST -H 'Content-Type: application/json' --data @/connectors/sink-dev.json http://kafka-connect-dev:8083/connectors
-    volumes:
-      - ./datastax-kafka-connect:/connectors:ro
+      - kafka-1-dev
+      - cassandra-dev
+      - cassandra-init-dev
+    ports:
+      - "8085:8080"
+
+  cassandra-connector-prod:
+    profiles: [prod]
+    build:
+      context: ./cassandra-connector
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      - KAFKA_BROKERS=kafka-1-prod:9092,kafka-2-prod:9092,kafka-3-prod:9092
+      - KAFKA_TOPIC=capstonelogi
+      - KAFKA_GROUP_ID=cassandra-logs-consumer
+      - CASSANDRA_HOSTS=cassandra-1-prod,cassandra-2-prod,cassandra-3-prod
+      - CASSANDRA_KEYSPACE=capstone
+      - CASSANDRA_PORT=9042
+      - BATCH_SIZE=500
+      - HEALTH_PORT=8080
+    depends_on:
+      - kafka-1-prod
+      - kafka-2-prod
+      - kafka-3-prod
+      - cassandra-1-prod
+      - cassandra-2-prod
+      - cassandra-3-prod
+      - cassandra-init-prod
+    ports:
+      - "8086:8080"
+
+
 
   pyspark-streamproc:
     profiles: [dev]
@@ -270,7 +235,7 @@ services:
       - redis-dev
     environment:
       - KAFKA_BOOTSTRAP=kafka-1-dev:9092
-      - KAFKA_TOPIC=capstone-logi
+      - KAFKA_TOPIC=capstonelogi
       - CHECKPOINT_DIR=/checkpoints
       - REDIS_HOST=redis-dev
       - REDIS_PORT=6379
@@ -367,8 +332,8 @@ services:
       - redis-cluster-init
     environment:
       - KAFKA_BOOTSTRAP=kafka-1-prod:9092,kafka-2-prod:9092,kafka-3-prod:9092
-      - KAFKA_TOPIC=capstone-logi
-      - CHECKPOINT_DIR=/checkpoints/capstone-logi
+      - KAFKA_TOPIC=capstonelogi
+      - CHECKPOINT_DIR=/checkpoints/capstonelogi
       - REDIS_CLUSTER_NODES=redis-0-prod:6379 redis-1-prod:6379 redis-2-prod:6379
       - PYSPARK_PYTHON=/opt/venv/bin/python
       - PYSPARK_DRIVER_PYTHON=/opt/venv/bin/python
@@ -376,7 +341,7 @@ services:
       - ./pyspark-streamproc/app:/app
       - pyspark_checkpoints_prod:/checkpoints
     command: >
-      bash -lc "install -d -o 1001 -g 1001 /checkpoints/capstone-logi && \
+      bash -lc "install -d -o 1001 -g 1001 /checkpoints/capstonelogi && \
       /opt/bitnami/spark/bin/spark-submit \
       --master spark://spark-master-prod:7077 \
       --deploy-mode cluster \
@@ -458,19 +423,10 @@ services:
     restart: "no"
     depends_on:
       - cassandra-dev
-    entrypoint: ["/bin/bash", "-c"]
-    command: |
-      i=0
-      while [ $$i -lt 30 ]; do
-        if cqlsh cassandra-dev 9042 -e 'DESCRIBE CLUSTER;'; then
-          break
-        fi
-        sleep 2
-        i=$$((i + 1))
-      done
-      cqlsh cassandra-dev 9042 -f /schema/schema-dev.cql
+    entrypoint: ["/bin/bash", "-lc"]
+    command: /schema/init-dev.sh
     volumes:
-      - ./cassandra-logdb:/schema:ro
+      - ./cassandra-logdb/init-scripts:/schema:ro
 
   cassandra-1-prod:
     profiles: [prod]
@@ -519,39 +475,11 @@ services:
       - cassandra-1-prod
       - cassandra-2-prod
       - cassandra-3-prod
-    entrypoint: ["/bin/bash", "-c"]
-    command: |
-      i=0
-      while [ $$i -lt 60 ]; do
-        if cqlsh cassandra-1-prod 9042 -e 'DESCRIBE CLUSTER;'; then
-          break
-        fi
-        sleep 2
-        i=$$((i + 1))
-      done
-      cqlsh cassandra-1-prod 9042 -f /schema/schema-prod.cql
+    entrypoint: ["/bin/bash", "-lc"]
+    command: /schema/init-prod.sh
     volumes:
-      - ./cassandra-logdb:/schema:ro
+      - ./cassandra-logdb/init-scripts:/schema:ro
 
-  kafka-connect-init-prod:
-    profiles: [prod]
-    image: curlimages/curl:8.8.0
-    restart: "no"
-    depends_on:
-      - kafka-connect-prod
-    entrypoint: ["/bin/sh", "-c"]
-    command: |
-      i=0
-      while [ $$i -lt 60 ]; do
-        if curl -sf http://kafka-connect-prod:8083/connectors; then
-          break
-        fi
-        sleep 2
-        i=$$((i + 1))
-      done
-      curl -s -X POST -H 'Content-Type: application/json' --data @/connectors/sink-prod.json http://kafka-connect-prod:8083/connectors
-    volumes:
-      - ./datastax-kafka-connect:/connectors:ro
 
   ml:
     profiles: [un-implemented] # TODO: When implemented, delete this line

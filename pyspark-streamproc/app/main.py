@@ -15,11 +15,11 @@ from pyspark.sql.types import (
 
 def main() -> None:
     bootstrap = os.getenv("KAFKA_BOOTSTRAP", "kafka-1-dev:9092")
-    topic = os.getenv("KAFKA_TOPIC", "capstone-logi")
+    topic = os.getenv("KAFKA_TOPIC", "capstonelogi")
 
     spark = (
         SparkSession.builder
-        .appName("capstone-logi-stream")
+        .appName("capstonelogi_stream")
         .config("spark.sql.shuffle.partitions", "2")
         .getOrCreate()
     )
@@ -66,7 +66,7 @@ def main() -> None:
         .select("event.*", "topic", "partition", "offset", "timestamp")
     )
 
-    logger = logging.getLogger("capstone-logi-stream")
+    logger = logging.getLogger("capstonelogi_stream")
     logging.basicConfig(level=os.getenv("PY_LOG_LEVEL", "INFO"))
 
     def write_batch(batch_df, batch_id: int) -> None:

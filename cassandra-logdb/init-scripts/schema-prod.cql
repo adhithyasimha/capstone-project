@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS capstone.logs_by_student_question (
   srn text,
   question_id int,
   ts_ms bigint,
-  event_id timeuuid,
+  event_id text,
   type text,
   content text,
   offset int,
@@ -22,5 +22,7 @@ CREATE TABLE IF NOT EXISTS capstone.logs_by_student_question (
     'class': 'SizeTieredCompactionStrategy'
   }
   AND compression = {'sstable_compression': 'LZ4Compressor'};
+
+
 
 

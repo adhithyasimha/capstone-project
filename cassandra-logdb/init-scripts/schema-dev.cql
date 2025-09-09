@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS capstone.logs_by_student_question (
   srn text,
   question_id int,
   ts_ms bigint,
-  event_id timeuuid,
+  event_id text,
   type text,
   content text,
   offset int,
@@ -18,5 +18,7 @@ CREATE TABLE IF NOT EXISTS capstone.logs_by_student_question (
   is_paste boolean,
   PRIMARY KEY ((srn, question_id), ts_ms, event_id)
 ) WITH CLUSTERING ORDER BY (ts_ms ASC, event_id ASC);
+
+
 
 

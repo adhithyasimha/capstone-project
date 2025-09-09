@@ -57,15 +57,6 @@ func InitProducer() error {
 	}
 
 	kafkaCtx = context.Background()
-	go func() {
-		record := &kgo.Record{Topic: "capstone-logi", Key: []byte("init"), Value: []byte("hello")}
-		err := kafkaClient.ProduceSync(kafkaCtx, record).FirstErr()
-		if err != nil {
-			log.Println("Kafka test produce failed:", err)
-		} else {
-			log.Println("Kafka test produce succeeded")
-		}
-	}()
 	return nil
 }
 
@@ -145,8 +136,16 @@ func HandleLogi(c *gin.Context) {
 			log.Println("json marshal error:", jerr)
 			continue
 		}
-		key := []byte(fmt.Sprintf("%s|%d", ev.SRN, ev.QuestionID))
-		record := &kgo.Record{Topic: "capstone-logi", Key: key, Value: payload}
+		keyStruct := struct {
+			SRN        string `json:"srn"`
+			QuestionID int    `json:"questionID"`
+		}{
+			SRN:        ev.SRN,
+			QuestionID: ev.QuestionID,
+		}
+		keyJSON, _ := json.Marshal(keyStruct)
+		key := keyJSON
+		record := &kgo.Record{Topic: "capstonelogi", Key: key, Value: payload}
 		// kafkaClient.Produce(kafkaCtx, record, func(_ *kgo.Record, err error) {
 		// 	log.Println("Kafka publishing done")
 		// 	if err != nil {
