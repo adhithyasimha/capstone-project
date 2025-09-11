@@ -1,4 +1,4 @@
-import Editor, { MonacoDiffEditor, loader } from "@monaco-editor/react";
+import Editor, { loader } from "@monaco-editor/react";
 import * as monaco from "monaco-editor";
 import SuperlitLogo from "@/components/superlitLogo";
 import {
@@ -26,7 +26,7 @@ import { useState, useEffect, useRef } from "react";
 import { useAuth } from "@/lib/authContext";
 import { useTheme } from "@/components/theme-provider";
 import AIViva from "./components/AIViva";
-import { logi, forceFlush } from "./capstoneLogi.ts";
+import { addLog } from "./capstoneLogi.ts";
 
 loader.config({
   monaco,
@@ -41,7 +41,7 @@ const languageToEditorLanguageMapping = {
   py: "python",
 };
 
-let isPaste = false;
+// paste detection will be added in subsequent step
 
 export default function AttemptAssignment() {
   const { classroomCode, assignmentID } = useParams();
@@ -56,6 +56,10 @@ export default function AttemptAssignment() {
   const [dialog, setDialog] = useState({});
   const [currentLanguage, setCurrentLanguage] = useState([]);
   const [userID, setUserID] = useState(null);
+  const pasteFlagRef = useRef(false);
+  const currentQuestionIndexRef = useRef(0);
+  const assignmentDataRef = useRef(null);
+  const userIDRef = useRef(null);
 
   const themeInfo = useTheme();
   const navigate = useNavigate();
@@ -185,7 +189,95 @@ export default function AttemptAssignment() {
 
   const handleEditorDidMount = (editor: any, monaco: any) => {
     editorRef.current = editor;
+    try {
+      const domNode = editor?.getDomNode?.();
+      if (domNode) {
+        domNode.addEventListener(
+          "paste",
+          () => {
+            pasteFlagRef.current = true;
+          },
+          true,
+        );
+      }
+
+      editor?.onDidChangeModelContent?.((e: any) => {
+        const now = Date.now();
+        const srn = userIDRef.current;
+        const q = assignmentDataRef.current as any;
+        const qi = currentQuestionIndexRef.current;
+        const questionID = Number(q?.questions?.[qi]?.ID);
+        if (!srn || !questionID) return;
+
+        if (Array.isArray(e?.changes)) {
+          for (const c of e.changes) {
+            if (c?.rangeLength > 0) {
+              addLog({
+                type: "delete",
+                srn,
+                questionID,
+                ts: now,
+                offset: c.rangeOffset,
+                numCharacters: c.rangeLength,
+                isPaste: pasteFlagRef.current,
+              });
+            }
+            if (c?.text && c.text.length > 0) {
+              addLog({
+                type: "insert",
+                srn,
+                questionID,
+                ts: now,
+                offset: c.rangeOffset,
+                content: c.text,
+                isPaste: pasteFlagRef.current || c.text.length >= 20,
+              });
+            }
+          }
+        }
+        pasteFlagRef.current = false;
+      });
+    } catch (err) {
+      console.error(err);
+    }
   };
+
+  // Emit a checkpoint once per question when editor + data are ready
+  const checkpointSentForQuestionRef = useRef(new Set<number>());
+  useEffect(() => {
+    if (editorRef.current && assignmentData != null && userID != null) {
+      try {
+        const model = (editorRef.current as any)?.getModel?.();
+        const raw = model?.getValue ? model.getValue() : "";
+        const normalized = typeof raw === "string" ? raw.replace(/\r\n/g, "\n") : "";
+        const questionID = Number((assignmentData as any).questions[currentQuestionIndex].ID);
+        if (Number.isFinite(questionID) && !checkpointSentForQuestionRef.current.has(questionID)) {
+          addLog({
+            type: "checkpoint",
+            srn: userID,
+            questionID,
+            ts: Date.now(),
+            content: normalized,
+          });
+          checkpointSentForQuestionRef.current.add(questionID);
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    }
+  }, [assignmentData, userID, currentQuestionIndex]);
+
+  useEffect(() => {
+    currentQuestionIndexRef.current = currentQuestionIndex;
+  }, [currentQuestionIndex]);
+
+  useEffect(() => {
+    assignmentDataRef.current = assignmentData;
+  }, [assignmentData]);
+
+  useEffect(() => {
+    userIDRef.current = userID;
+  }, [userID]);
 
   useEffect(() => {
     if (token == null) {
@@ -351,9 +443,6 @@ export default function AttemptAssignment() {
                   }
                   theme={themeInfo.theme == "dark" ? "vs-dark" : "vs-light"}
                   className="resize-y overflow-auto"
-                  onPaste={() => {
-                    isPaste = true;
-                  }}
                   onChange={(value: string | undefined) => {
                     const prevValue: string = editorData[currentQuestionIndex];
                     const delta = value.length - prevValue.length;
@@ -377,18 +466,7 @@ export default function AttemptAssignment() {
                     );
                     setEditorData([...tempEditorData]);
 
-                    logi(
-                      userID,
-                      currentQuestionIndex,
-                      prevValue,
-                      value,
-                      timestamp,
-                      isPaste,
-                      isDeletion,
-                      false,
-                      false,
-                    );
-                    isPaste = false;
+                    // keystroke logging will be emitted via Monaco change listener in a subsequent step
                   }}
                   onMount={handleEditorDidMount}
                 />
@@ -404,8 +482,6 @@ export default function AttemptAssignment() {
                 languages={currentLanguage}
                 assignmentID={parseInt(assignmentID)}
                 AIVivaTriggerRef={AIVivaTriggerRef}
-                logi={logi}
-                forceFlush={forceFlush}
                 userID={userID}
               />
             </ResizablePanel>

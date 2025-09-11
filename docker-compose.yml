@@ -113,6 +113,7 @@ services:
     volumes:
       - kafka_data_1:/bitnami/kafka
 
+
   kafka-2-prod:
     profiles: [prod]
     build:
@@ -139,6 +140,7 @@ services:
     volumes:
       - kafka_data_3:/bitnami/kafka
 
+
   kafka-1-dev:
     profiles: [dev]
     build:
@@ -148,51 +150,336 @@ services:
       - KAFKA_KRAFT_CLUSTER_ID=q1w2e3r4t5y6u7i8o9p0aa
       - KAFKA_CFG_NODE_ID=1
       - KAFKA_CFG_CONTROLLER_QUORUM_VOTERS=1@kafka-1-dev:9093
-      - KAFKA_CFG_LISTENERS=PLAINTEXT://:9092,EXTERNAL://:9094,CONTROLLER://:9093
-      - KAFKA_CFG_ADVERTISED_LISTENERS=PLAINTEXT://kafka-1-dev:9092,EXTERNAL://localhost:9094
-      - KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT
+      - KAFKA_CFG_LISTENERS=PLAINTEXT://:9092,CONTROLLER://:9093
+      - KAFKA_CFG_ADVERTISED_LISTENERS=PLAINTEXT://kafka-1-dev:9092
+      - KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
       - KAFKA_CFG_DEFAULT_REPLICATION_FACTOR=1
       - KAFKA_CFG_OFFSETS_TOPIC_REPLICATION_FACTOR=1
       - KAFKA_CFG_TRANSACTION_STATE_LOG_REPLICATION_FACTOR=1
       - KAFKA_CFG_TRANSACTION_STATE_LOG_MIN_ISR=1
-    ports:
-      - "9094:9094"
     volumes:
       - kafka_data_1:/bitnami/kafka
 
 
+
   kafka-consumer-dummy-dev:
-    profiles: [dev]
+    profiles: [debug] # change to dev when needed
     build:
       context: ./kafka-consumer-dummy
     restart: unless-stopped
     environment:
-      - TOPIC=capstone-logi
+      - TOPIC=capstonelogi
       - GROUP_ID=dummy-consumer
       - BOOTSTRAP=kafka-1-dev:9092
     depends_on:
       - kafka-1-dev
 
+  cassandra-connector-dev:
+    profiles: [dev]
+    build:
+      context: ./cassandra-connector
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      - KAFKA_BROKERS=kafka-1-dev:9092
+      - KAFKA_TOPIC=capstonelogi
+      - KAFKA_GROUP_ID=cassandra-logs-consumer
+      - CASSANDRA_HOSTS=cassandra-dev
+      - CASSANDRA_KEYSPACE=capstone
+      - CASSANDRA_PORT=9042
+      - BATCH_SIZE=100
+      - HEALTH_PORT=8080
+    depends_on:
+      - kafka-1-dev
+      - cassandra-dev
+      - cassandra-init-dev
+    ports:
+      - "8085:8080"
+
+  cassandra-connector-prod:
+    profiles: [prod]
+    build:
+      context: ./cassandra-connector
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      - KAFKA_BROKERS=kafka-1-prod:9092,kafka-2-prod:9092,kafka-3-prod:9092
+      - KAFKA_TOPIC=capstonelogi
+      - KAFKA_GROUP_ID=cassandra-logs-consumer
+      - CASSANDRA_HOSTS=cassandra-1-prod,cassandra-2-prod,cassandra-3-prod
+      - CASSANDRA_KEYSPACE=capstone
+      - CASSANDRA_PORT=9042
+      - BATCH_SIZE=500
+      - HEALTH_PORT=8080
+    depends_on:
+      - kafka-1-prod
+      - kafka-2-prod
+      - kafka-3-prod
+      - cassandra-1-prod
+      - cassandra-2-prod
+      - cassandra-3-prod
+      - cassandra-init-prod
+    ports:
+      - "8086:8080"
+
+
+
   pyspark-streamproc:
-    profiles: [un-implemented] # TODO: When implemented, delete this line
+    profiles: [dev]
     build:
       context: ./pyspark-streamproc
       dockerfile: Dockerfile
     restart: unless-stopped
+    depends_on:
+      - kafka-1-dev
+      - redis-dev
+    environment:
+      - KAFKA_BOOTSTRAP=kafka-1-dev:9092
+      - KAFKA_TOPIC=capstonelogi
+      - CHECKPOINT_DIR=/checkpoints
+      - REDIS_HOST=redis-dev
+      - REDIS_PORT=6379
+      - PYSPARK_PYTHON=/opt/venv/bin/python
+      - PYSPARK_DRIVER_PYTHON=/opt/venv/bin/python
+    volumes:
+      - ./pyspark-streamproc/app:/app
+      - pyspark_checkpoints:/checkpoints
+    command: >
+      bash -lc "\
+      /opt/bitnami/spark/bin/spark-submit \
+      --master local[*] \
+      --conf spark.pyspark.python=/opt/venv/bin/python \
+      --conf spark.pyspark.driver.python=/opt/venv/bin/python \
+      --conf spark.ui.enabled=true \
+      --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1 \
+      /app/main.py"
 
-  faiss-simsearch:
-    profiles: [un-implemented] # TODO: When implemented, delete this line
+  redis-dev:
+    profiles: [dev]
+    image: bitnami/redis:7.2.5
+    restart: unless-stopped
+    environment:
+      - ALLOW_EMPTY_PASSWORD=yes
+    ports:
+      - "6379:6379"
+
+  redis-commander-dev:
+    profiles: [dev]
+    image: rediscommander/redis-commander:latest
+    restart: unless-stopped
+    environment:
+      - REDIS_HOSTS=local:redis-dev:6379
+    ports:
+      - "8081:8081"
+    depends_on:
+      - redis-dev
+
+  spark-master-prod:
+    profiles: [prod]
     build:
-      context: ./faiss-simsearch
+      context: ./pyspark-streamproc
+      dockerfile: Dockerfile
+    environment:
+      - SPARK_MODE=master
+      - PYSPARK_PYTHON=/opt/venv/bin/python
+      - PYSPARK_DRIVER_PYTHON=/opt/venv/bin/python
+    volumes:
+      - pyspark_checkpoints_prod:/checkpoints
+
+  spark-worker-1-prod:
+    profiles: [prod]
+    build:
+      context: ./pyspark-streamproc
+      dockerfile: Dockerfile
+    depends_on:
+      - spark-master-prod
+    environment:
+      - SPARK_MODE=worker
+      - SPARK_MASTER_URL=spark://spark-master-prod:7077
+      - PYSPARK_PYTHON=/opt/venv/bin/python
+      - PYSPARK_DRIVER_PYTHON=/opt/venv/bin/python
+    volumes:
+      - pyspark_checkpoints_prod:/checkpoints
+
+  spark-worker-2-prod:
+    profiles: [prod]
+    build:
+      context: ./pyspark-streamproc
+      dockerfile: Dockerfile
+    depends_on:
+      - spark-master-prod
+    environment:
+      - SPARK_MODE=worker
+      - SPARK_MASTER_URL=spark://spark-master-prod:7077
+      - PYSPARK_PYTHON=/opt/venv/bin/python
+      - PYSPARK_DRIVER_PYTHON=/opt/venv/bin/python
+    volumes:
+      - pyspark_checkpoints_prod:/checkpoints
+
+  pyspark-1-prod:
+    profiles: [prod]
+    build:
+      context: ./pyspark-streamproc
       dockerfile: Dockerfile
     restart: unless-stopped
+    depends_on:
+      - spark-master-prod
+      - spark-worker-1-prod
+      - spark-worker-2-prod
+      - kafka-1-prod
+      - kafka-2-prod
+      - kafka-3-prod
+      - redis-cluster-init
+    environment:
+      - KAFKA_BOOTSTRAP=kafka-1-prod:9092,kafka-2-prod:9092,kafka-3-prod:9092
+      - KAFKA_TOPIC=capstonelogi
+      - CHECKPOINT_DIR=/checkpoints/capstonelogi
+      - REDIS_CLUSTER_NODES=redis-0-prod:6379 redis-1-prod:6379 redis-2-prod:6379
+      - PYSPARK_PYTHON=/opt/venv/bin/python
+      - PYSPARK_DRIVER_PYTHON=/opt/venv/bin/python
+    volumes:
+      - ./pyspark-streamproc/app:/app
+      - pyspark_checkpoints_prod:/checkpoints
+    command: >
+      bash -lc "install -d -o 1001 -g 1001 /checkpoints/capstonelogi && \
+      /opt/bitnami/spark/bin/spark-submit \
+      --master spark://spark-master-prod:7077 \
+      --deploy-mode cluster \
+      --supervise \
+      --conf spark.pyspark.python=/opt/venv/bin/python \
+      --conf spark.pyspark.driver.python=/opt/venv/bin/python \
+      --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1 \
+      /app/main.py"
 
-  cassandra-logdb:
-    profiles: [un-implemented] # TODO: When implemented, delete this line
+  # Redis Cluster (3 masters, no replicas) for prod demo
+  redis-0-prod:
+    profiles: [prod]
+    image: bitnami/redis-cluster:7.2.5
+    environment:
+      - ALLOW_EMPTY_PASSWORD=yes
+      - REDIS_NODES=redis-0-prod redis-1-prod redis-2-prod
+    restart: unless-stopped
+
+  redis-1-prod:
+    profiles: [prod]
+    image: bitnami/redis-cluster:7.2.5
+    environment:
+      - ALLOW_EMPTY_PASSWORD=yes
+      - REDIS_NODES=redis-0-prod redis-1-prod redis-2-prod
+    restart: unless-stopped
+
+  redis-2-prod:
+    profiles: [prod]
+    image: bitnami/redis-cluster:7.2.5
+    environment:
+      - ALLOW_EMPTY_PASSWORD=yes
+      - REDIS_NODES=redis-0-prod redis-1-prod redis-2-prod
+    restart: unless-stopped
+
+  redis-cluster-init:
+    profiles: [prod]
+    image: bitnami/redis-cluster:7.2.5
+    depends_on:
+      - redis-0-prod
+      - redis-1-prod
+      - redis-2-prod
+    environment:
+      - ALLOW_EMPTY_PASSWORD=yes
+      - REDIS_NODES=redis-0-prod redis-1-prod redis-2-prod
+      - REDIS_CLUSTER_REPLICAS=0
+      - REDIS_CLUSTER_CREATOR=yes
+    restart: "no"
+
+
+
+  faiss-simsearch:
+    profiles: [prod, dev]
+    build:
+      context: ./faiss-simsearch/
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    volumes:
+      - faiss_data:/app/saved_data
+    ports:
+      - "8000:8000"
+
+  cassandra-dev:
+    profiles: [dev]
     build:
       context: ./cassandra-logdb
       dockerfile: Dockerfile
     restart: unless-stopped
+    environment:
+      - CASSANDRA_CLUSTER_NAME=capstone_cluster
+      - CASSANDRA_NUM_TOKENS=16
+    ports:
+      - "9042:9042"
+    volumes:
+      - cassandra_data_dev:/var/lib/cassandra
+
+  cassandra-init-dev:
+    profiles: [dev]
+    image: cassandra:4.1
+    restart: "no"
+    depends_on:
+      - cassandra-dev
+    entrypoint: ["/bin/bash", "-lc"]
+    command: /schema/init-dev.sh
+    volumes:
+      - ./cassandra-logdb/init-scripts:/schema:ro
+
+  cassandra-1-prod:
+    profiles: [prod]
+    build:
+      context: ./cassandra-logdb
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      - CASSANDRA_CLUSTER_NAME=capstone_cluster
+      - CASSANDRA_NUM_TOKENS=16
+      - CASSANDRA_SEEDS=cassandra-1-prod,cassandra-2-prod
+    volumes:
+      - cassandra_data_1:/var/lib/cassandra
+
+  cassandra-2-prod:
+    profiles: [prod]
+    build:
+      context: ./cassandra-logdb
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      - CASSANDRA_CLUSTER_NAME=capstone_cluster
+      - CASSANDRA_NUM_TOKENS=16
+      - CASSANDRA_SEEDS=cassandra-1-prod,cassandra-2-prod
+    volumes:
+      - cassandra_data_2:/var/lib/cassandra
+
+  cassandra-3-prod:
+    profiles: [prod]
+    build:
+      context: ./cassandra-logdb
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      - CASSANDRA_CLUSTER_NAME=capstone_cluster
+      - CASSANDRA_NUM_TOKENS=16
+      - CASSANDRA_SEEDS=cassandra-1-prod,cassandra-2-prod
+    volumes:
+      - cassandra_data_3:/var/lib/cassandra
+
+  cassandra-init-prod:
+    profiles: [prod]
+    image: cassandra:4.1
+    restart: "no"
+    depends_on:
+      - cassandra-1-prod
+      - cassandra-2-prod
+      - cassandra-3-prod
+    entrypoint: ["/bin/bash", "-lc"]
+    command: /schema/init-prod.sh
+    volumes:
+      - ./cassandra-logdb/init-scripts:/schema:ro
+
 
   ml:
     profiles: [un-implemented] # TODO: When implemented, delete this line
@@ -221,6 +508,13 @@ volumes:
   kafka_data_1:
   kafka_data_2:
   kafka_data_3:
+  faiss_data:
+  pyspark_checkpoints:
+  pyspark_checkpoints_prod:
+  cassandra_data_dev:
+  cassandra_data_1:
+  cassandra_data_2:
+  cassandra_data_3:
 
 networks:
   default: {}

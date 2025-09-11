@@ -1,71 +1,96 @@
-interface LogEntry {
-  userID: string;
-  currentQuestionIndex: number;
-  editorContentBefore: string | undefined;
-  editorContentAfter: string | undefined;
-  timestamp: string;
+export type LogEventType =
+  | "checkpoint"
+  | "insert"
+  | "delete"
+  | "run"
+  | "submission";
+
+export interface BaseLogEvent {
+  type: LogEventType;
+  srn: string; // globally unique student ID
+  questionID: number; // global question ID
+  ts: number; // epoch ms (UTC)
+}
+
+export interface CheckpointEvent extends BaseLogEvent {
+  type: "checkpoint";
+  content: string; // full editor text, normalized to \n EOL by caller
+}
+
+export interface InsertEvent extends BaseLogEvent {
+  type: "insert";
+  offset: number; // UTF-16 code unit index
+  content: string; // inserted text
   isPaste: boolean;
-  isDeletion: boolean;
-  isCompilation: boolean;
-  isSubmission: boolean;
 }
 
-// In-memory store for logs
-const logBuffer: LogEntry[] = [];
+export interface DeleteEvent extends BaseLogEvent {
+  type: "delete";
+  offset: number; // UTF-16 code unit index (start of deletion)
+  numCharacters: number; // UTF-16 code units removed
+  isPaste: boolean;
+}
 
-export async function logi(
-  userID: string,
-  currentQuestionIndex: number,
-  editorContentBefore: string | undefined,
-  editorContentAfter: string | undefined,
-  timestamp: number | string,
-  isPaste: boolean,
-  isDeletion: boolean,
-  isCompilation: boolean,
-  isSubmission: boolean,
-) {
-  timestamp = String(timestamp);
-  const newLogEntry: LogEntry = {
-    userID,
-    currentQuestionIndex,
-    editorContentBefore,
-    editorContentAfter,
-    timestamp,
-    isPaste,
-    isDeletion,
-    isCompilation,
-    isSubmission,
-  };
+export interface RunEvent extends BaseLogEvent {
+  type: "run";
+}
 
-  // Push the new entry into our in-memory array
-  logBuffer.push(newLogEntry);
+export interface SubmissionEvent extends BaseLogEvent {
+  type: "submission";
+}
 
-  // If log count exceeds 150, force flush
-  if (logBuffer.length > 150) {
-    forceFlush();
-    logBuffer.length = 0;
+export type LogEvent =
+  | CheckpointEvent
+  | InsertEvent
+  | DeleteEvent
+  | RunEvent
+  | SubmissionEvent;
+
+// Explicit singleton logger with HMR-safe instance
+class CapstoneLogger {
+  private logBuffer: LogEvent[] = [];
+
+  addLog(event: LogEvent) {
+    this.logBuffer.push(event);
+    if (this.logBuffer.length > 150) { // TODO: temporarily a small number, set to higher in prod later
+      void this.flushLogs();
+    }
   }
-}
 
-export async function forceFlush() {
-  console.log("forceFlush called with logs:", logBuffer);
+  async flushLogs() {
+    if (this.logBuffer.length === 0) return;
+    const payload = { logs: this.logBuffer.slice() };
 
-  fetch("/api/capstone-logi", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      logs: logBuffer,
-    }),
-  })
-    .then((res) => {
+    try {
+      const res = await fetch("/api/capstone-logi", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
       if (!res.ok) {
         throw new Error("Failed to send logs");
       }
-      console.log("Logs successfully flushed to server");
-      // Clear log buffer after successful flush
-      logBuffer.length = 0;
-    })
-    .catch((err) => {
+      this.logBuffer.length = 0;
+    } catch (err) {
       console.error(err);
-    });
+    }
+  }
+}
+
+// Ensure single instance even during HMR: stash on globalThis
+const __GLOBAL_KEY__ = "__CAPSTONE_LOGGER_SINGLETON__";
+type GlobalWithLogger = typeof globalThis & {
+  __CAPSTONE_LOGGER_SINGLETON__?: CapstoneLogger;
+};
+const g = globalThis as GlobalWithLogger;
+export const capstoneLogger: CapstoneLogger =
+  g[__GLOBAL_KEY__] ?? (g[__GLOBAL_KEY__] = new CapstoneLogger());
+
+// Named helpers that proxy to the singleton instance
+export function addLog(event: LogEvent) {
+  capstoneLogger.addLog(event);
+}
+
+export async function flushLogs() {
+  return capstoneLogger.flushLogs();
 }
